@@ -1,0 +1,144 @@
+diff --git a/simulation/classes.py b/simulation/classes.py
+index 9d64468..963c7d3 100644
+--- a/simulation/classes.py
++++ b/simulation/classes.py
+@@ -83,7 +83,8 @@ class Product:
+ 
+ class Step:
+ 
+-    def __init__(self, idx, pieces_per_lot, d):
++    def __init__(self, idx, pieces_per_lot, d, batch_pieces=None):
++        batch_pieces = batch_pieces or pieces_per_lot
+         self.idx = idx
+         self.order = d['STEP']
+         self.step_name = d['DESC']
+@@ -113,8 +114,8 @@ class Step:
+             else:
+                 self.cascading_time = self.processing_time
+         self.batching = d['PTPER'] == 'per_batch'
+-        self.batch_min = 1 if d['BATCHMN'] == '' else int(d['BATCHMN'] / pieces_per_lot)
+-        self.batch_max = 1 if d['BATCHMX'] == '' else int(d['BATCHMX'] / pieces_per_lot)
++        self.batch_min = 1 if d['BATCHMN'] == '' else int(d['BATCHMN'] / batch_pieces)
++        self.batch_max = 1 if d['BATCHMX'] == '' else int(d['BATCHMX'] / batch_pieces)
+         self.sampling_percent = 100 if d['StepPercent'] in ['', None] else float(d['StepPercent'])
+         self.rework_percent = 0 if d['REWORK'] in ['', None] else float(d['REWORK'])
+         
+@@ -219,6 +220,6 @@ class Route:
+ 
+ class FileRoute(Route):
+ 
+-    def __init__(self, idx, pieces_per_lot, steps: List[Dict]):
+-        steps = [Step(i, pieces_per_lot, d) for i, d in enumerate(steps)]
++    def __init__(self, idx, pieces_per_lot, steps: List[Dict], batch_pieces=None):
++        steps = [Step(i, pieces_per_lot, d, batch_pieces) for i, d in enumerate(steps)]
+         super().__init__(idx, steps)
+diff --git a/simulation/events.py b/simulation/events.py
+index 40d3c41..34a539e 100644
+--- a/simulation/events.py
++++ b/simulation/events.py
+@@ -61,6 +61,18 @@ class BreakdownEvent:
+         else:
+             self.machine.pmed_time += length
+         instance.handle_breakdown(self.machine, length)
++        # patched: expose the sampled downtime to plugins
++        self.last_length = length
++        self.machine_was_idle = False
++        # patched (opt-in): an idle tool that goes down stays unavailable until it is repaired.
++        # Upstream only delays work in progress, so an idle tool could still be dispatched to while down.
++        if getattr(instance, 'strict_downtime', False) and hasattr(instance, 'free_machines')                 and instance.free_machines[self.machine.idx]:
++            self.machine_was_idle = True
++            instance.free_machines[self.machine.idx] = False
++            instance.usable_machines.discard(self.machine)
++            ev = MachineDoneEvent(instance.current_time + length, [self.machine])
++            instance.add_event(ev)
++            self.machine.events.append(ev)
+         for plugin in instance.plugins:
+             if self.is_breakdown:
+                 plugin.on_breakdown(instance, self)
+diff --git a/simulation/file_instance.py b/simulation/file_instance.py
+index 5cb34fe..c599e6f 100644
+--- a/simulation/file_instance.py
++++ b/simulation/file_instance.py
+@@ -25,19 +25,22 @@ class FileInstance(Instance):
+         from_to = {(a['FROMLOC'], a['TOLOC']): get_distribution(a['DDIST'], a['DUNITS'], a['DTIME'], a['DTIME2']) for a
+                    in files['fromto.txt']}
+ 
+-        pieces = max([a['PIECES'] for a in files['order.txt'] + files['WIP.txt']])
++        # patched: per-lot wafer counts (engineering lots). Batch sizes stay in nominal-lot units.
++        pieces = max([a['PIECES'] for a in files['order.txt']])
+         routes = {}
+-        route_keys = [key for key in files.keys() if 'route' in key]
+-        for rk in route_keys:
+-            route = FileRoute(rk, pieces, files[rk])
+-            last_loc = None
+-            for s in route.steps:
+-                s.family_location = family_locations[s.family]
+-                key = (last_loc, s.family_location)
+-                if last_loc is not None and key in from_to:
+-                    s.transport_time = from_to[key]
+-                last_loc = s.family_location
+-            routes[rk] = route
++
++        def get_route(rk, n):
++            if (rk, n) not in routes:
++                route = FileRoute(rk, n, files[rk], batch_pieces=pieces)
++                last_loc = None
++                for s in route.steps:
++                    s.family_location = family_locations[s.family]
++                    key = (last_loc, s.family_location)
++                    if last_loc is not None and key in from_to:
++                        s.transport_time = from_to[key]
++                    last_loc = s.family_location
++                routes[(rk, n)] = route
++            return routes[(rk, n)]
+ 
+         parts = {p['PART']: p['ROUTEFILE'] for p in files['part.txt']}
+ 
+@@ -45,28 +48,41 @@ class FileInstance(Instance):
+         idx = 0
+         lot_pre = {}
+         for order in files['order.txt']:
+-            assert pieces == order['PIECES']
+             first_release = 0
+             release_interval = get_interval(order['REPEAT'], order['RUNITS'])
+             relative_deadline = (date_time_parse(order['DUE']) - date_time_parse(order['START'])).total_seconds()
+ 
+             for i in range(order['RPT#']):
+                 rel_time = first_release + i * release_interval
+-                lot = Lot(idx, routes[parts[order['PART']]], order['PRIOR'], rel_time, relative_deadline, order)
++                lot = Lot(idx, get_route(parts[order['PART']], order['PIECES']), order['PRIOR'], rel_time,
++                          relative_deadline, order)
+                 lots.append(lot)
+                 lot_pre[lot.name] = relative_deadline
+                 idx += 1
+                 if rel_time > run_to:
+                     break
+ 
++        if len(files['E_order.txt']) > 0:
++            t0 = min(date_time_parse(o['START']) for o in files['order.txt'])
++            for order in files['E_order.txt']:
++                rel_time = (date_time_parse(order['START']) - t0).total_seconds()
++                relative_deadline = (date_time_parse(order['DUE']) - date_time_parse(order['START'])).total_seconds()
++                lot_pre[order['LOT'].rsplit('_', 1)[0]] = relative_deadline
++                if rel_time > run_to:
++                    continue
++                lot = Lot(idx, get_route(parts[order['PART']], order['PIECES']), order['PRIOR'], rel_time,
++                          relative_deadline, order)
++                lots.append(lot)
++                idx += 1
++
+         for wip in files['WIP.txt']:
+-            assert pieces == wip['PIECES']
+             first_release = 0
+             relative_deadline = (date_time_parse(wip['DUE']) - date_time_parse(wip['START'])).total_seconds()
+-            if wip['CURSTEP'] < len(routes[parts[wip['PART']]].steps) - 1:
+-                lot = Lot(idx, routes[parts[wip['PART']]], wip['PRIOR'], first_release, relative_deadline, wip)
++            route = get_route(parts[wip['PART']], wip['PIECES'])
++            if wip['CURSTEP'] < len(route.steps) - 1:
++                lot = Lot(idx, route, wip['PRIOR'], first_release, relative_deadline, wip)
+                 lots.append(lot)
+-                lot.release_at = lot.deadline_at - lot_pre[lot.name]
++                lot.release_at = lot.deadline_at - lot_pre.get(lot.name, relative_deadline)
+             idx += 1
+ 
+         setups = {(s['CURSETUP'], s['NEWSETUP']): get_interval(s['STIME'], s['STUNITS']) for s in files['setup.txt']}

@@ -1,0 +1,20 @@
+# 모델별 가격(USD, 100만 토큰당). 비용은 이 표와 기록한 토큰 수로 계산한다. 가격이 바뀌면 기준일을 바꾸고 다시 계산한다.
+# 출처: https://platform.claude.com/docs/en/about-claude/pricing.md (2026-11-13 원문 확인)
+version: "2026-11-13"
+models:
+  claude-fable-5-2:  {input: 8.0,  output: 40.0, cache_write_5m: 10.0,  cache_write_1h: 16.0, cache_read: 0.20}
+  claude-opus-5-5:   {input: 4.0,  output: 20.0, cache_write_5m: 5.0,   cache_write_1h: 8.0,  cache_read: 0.20}
+  claude-sonnet-5-5: {input: 2.0,  output: 10.0, cache_write_5m: 2.5,   cache_write_1h: 4.0,  cache_read: 0.10}
+  claude-haiku-5-5:
+    input: 0.10
+    output: 0.50
+    cache_write_5m: 0.125
+    cache_write_1h: 0.20
+    cache_read: 0.01
+    # 요청의 프롬프트(캐시 읽기·쓰기 포함)가 10만 토큰을 넘으면 요청 전체에 이 가격을 적용한다
+    over_100k: {input: 0.50, output: 2.50, cache_write_5m: 0.625, cache_write_1h: 1.0, cache_read: 0.05}
+  # 이전 세대 Haiku. 공식 가격표 2026-11-14 확인. 응답의 모델 ID가 날짜가 붙은 형태로 올 수 있어 둘 다 둔다
+  claude-haiku-4-5:          {input: 1.0, output: 5.0, cache_write_5m: 1.25, cache_write_1h: 2.0, cache_read: 0.10}
+  claude-haiku-4-5-20251001: {input: 1.0, output: 5.0, cache_write_5m: 1.25, cache_write_1h: 2.0, cache_read: 0.10}
+  # 게이트웨이 모델은 응답의 usage.estimated_cost(USD)를 쓴다(가격표 없음)
+  google/gemma-4-31B-it: null

@@ -1,0 +1,185 @@
+# SHACL 데이터 제약 (기획서 v3 5.4 "데이터 제약"). 위반을 사실로 materialize해 진단 질의 대상으로 만든다
+# - 실행: scripts/validate_kg.py (pySHACL). 결과는 fab:ConstraintViolation으로 KG에 적재
+# - 큰 클래스(StepExecution 23만)를 SPARQL 제약의 focus로 잡으면 질의가 focus 수만큼 돈다. 그래서 SPARQL 제약은
+#   대상이 적은 쪽(Q-time 제약 372개, 장비 1,068대, LTL 출발 step)을 focus로 잡고 한 질의에서 위반을 모두 반환한다
+# - 정답(SQL 참조 구현)과의 일치는 scripts/check_kg.py가 확인한다. SHACL 결과를 정답으로 쓰지 않는다
+
+@prefix sh:   <http://www.w3.org/ns/shacl#> .
+@prefix fab:  <https://w3id.org/ontosemc/fab#> .
+@prefix shp:  <https://w3id.org/ontosemc/shapes#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+
+<https://w3id.org/ontosemc/shapes> a owl:Ontology ;
+  sh:declare [ sh:prefix "fab" ; sh:namespace "https://w3id.org/ontosemc/fab#"^^xsd:anyURI ] ,
+             [ sh:prefix "xsd" ; sh:namespace "http://www.w3.org/2001/XMLSchema#"^^xsd:anyURI ] .
+
+#################################################################
+# 1. Q-time (CQT). Kopp et al. WSC 2020: 진입 step 완료 ~ 종료 step 처리 시작 > maxHours
+#    focus = Q-time 제약, value = 진입 실행(또는 기록 시작 시점 스냅샷)
+#    위반: 기한 안에 종료 step 진입이 없고, (기한 뒤에 진입했거나 기록 종료 시점에 이미 기한이 지남)
+#################################################################
+
+shp:QTimeShape a sh:NodeShape ;
+  sh:targetClass fab:QTimeConstraint ;
+  sh:sparql [
+    a sh:SPARQLConstraint ;
+    sh:message "Q-time 초과: {?lotId}, 진입 step 종료 {?tout}, 기한 {?deadline}" ;
+    sh:prefixes <https://w3id.org/ontosemc/shapes> ;
+    sh:select """
+      SELECT $this ?value ?lotId ?tout ?deadline WHERE {
+        $this fab:entryStep ?es ; fab:exitStep ?xs ; fab:maxHours ?max .
+        ?f fab:windowEnd ?wend .
+        {
+          ?value fab:atStep ?es ; fab:ofLot ?lot ; fab:trackOutTime ?tout . BIND (false AS ?snap)
+        } UNION {
+          ?value fab:openConstraint $this ; fab:snapshotLot ?lot ; fab:entryTrackOutTime ?tout . BIND (true AS ?snap)
+        }
+        # 스냅샷 진입 중 같은 진입 실행이 이력에 있는 것(완료 lot)은 중복이라 뺀다. 바깥 변수(?es)를 쓰므로 UNION 밖에 둔다
+        FILTER (!?snap || NOT EXISTS { ?e2 fab:atStep ?es ; fab:ofLot ?lot ; fab:trackOutTime ?tout . })
+        ?lot fab:identifier ?lotId .
+        BIND (?tout + STRDT(CONCAT("PT", STR(xsd:integer(ROUND(?max * 3600))), "S"), xsd:dayTimeDuration) AS ?deadline)
+        FILTER NOT EXISTS {
+          ?ok fab:ofLot ?lot ; fab:atStep ?xs ; fab:trackInTime ?tok .
+          FILTER (?tok > ?tout && ?tok <= ?deadline)
+        }
+        FILTER (EXISTS { ?late fab:ofLot ?lot ; fab:atStep ?xs ; fab:trackInTime ?tl . FILTER (?tl > ?deadline) }
+                || ?wend > ?deadline)
+      }""" ] .
+
+#################################################################
+# 2. LTL dedication (SMT2020: 대상 step은 출발 step과 정확히 같은 장비)
+#    2a 라우트 규칙 기준: 출발 step 실행(대상 실행 직전 것)과 대상 step 실행의 장비가 다르면 위반
+#    2b MES dedication 기록 기준: 기록된 장비와 실제 장비가 다르면 위반
+#################################################################
+
+shp:LtlChainShape a sh:NodeShape ;
+  sh:targetSubjectsOf fab:ltlDedicatedTo ;
+  sh:sparql [
+    a sh:SPARQLConstraint ;
+    sh:message "LTL 위반: {?lotId}가 전용 장비 {?srcTool} 대신 {?tgtTool}에서 처리" ;
+    sh:prefixes <https://w3id.org/ontosemc/shapes> ;
+    sh:select """
+      SELECT $this ?value ?lotId ?srcTool ?tgtTool WHERE {
+        $this fab:ltlDedicatedTo ?tgt .
+        ?src fab:atStep $this ; fab:ofLot ?lot ; fab:processedOn ?srcTool ; fab:trackInTime ?ts .
+        ?value fab:atStep ?tgt ; fab:ofLot ?lot ; fab:processedOn ?tgtTool ; fab:trackInTime ?tv .
+        FILTER (?ts < ?tv && ?srcTool != ?tgtTool)
+        FILTER NOT EXISTS { ?src2 fab:atStep $this ; fab:ofLot ?lot ; fab:trackInTime ?ts2 . FILTER (?ts2 > ?ts && ?ts2 < ?tv) }
+        ?lot fab:identifier ?lotId .
+      }""" ] .
+
+shp:LtlRecordShape a sh:NodeShape ;
+  sh:targetClass fab:LtlDedication ;
+  sh:sparql [
+    a sh:SPARQLConstraint ;
+    sh:message "LTL 기록 위반: 전용 장비가 아닌 장비에서 처리" ;
+    sh:prefixes <https://w3id.org/ontosemc/shapes> ;
+    sh:select """
+      SELECT $this ?value WHERE {
+        $this fab:dedicatedLot ?lot ; fab:dedicatedStep ?st ; fab:dedicatedTool ?tool .
+        ?value fab:ofLot ?lot ; fab:atStep ?st ; fab:processedOn ?used .
+        FILTER (?used != ?tool)
+      }""" ] .
+
+#################################################################
+# 3. qualification (SMT2020: toolgroup = 적격 집합). focus = 장비
+# 4. 장비 가용성 (P1의 데이터 측면): 정지 구간 안에서 track-in 금지. focus = 장비
+#################################################################
+
+shp:ToolQualificationShape a sh:NodeShape ;
+  sh:targetClass fab:Tool ;
+  sh:sparql [
+    a sh:SPARQLConstraint ;
+    sh:message "비적격 처리: 장비의 toolgroup이 step이 요구하는 toolgroup과 다름" ;
+    sh:prefixes <https://w3id.org/ontosemc/shapes> ;
+    sh:select """
+      SELECT $this ?value WHERE {
+        $this fab:memberOf ?g .
+        ?value fab:processedOn $this ; fab:atStep ?st .
+        ?st fab:requiresToolGroup ?req .
+        FILTER (?g != ?req)
+      }""" ] .
+
+shp:ToolAvailabilityShape a sh:NodeShape ;
+  sh:targetClass fab:Tool ;
+  sh:sparql [
+    a sh:SPARQLConstraint ;
+    sh:message "정지 중 track-in" ;
+    sh:prefixes <https://w3id.org/ontosemc/shapes> ;
+    sh:select """
+      SELECT $this ?value WHERE {
+        ?d fab:onTool $this ; fab:startTime ?s ; fab:endTime ?e .
+        ?value fab:processedOn $this ; fab:trackInTime ?tin .
+        FILTER (?tin > ?s && ?tin < ?e)
+      }""" ] .
+
+#################################################################
+# 5. 장비 상태 무결성 (기획서 5.4 "상태 전이"의 구현 범위)
+#    SEMI E10의 허용 전이 목록은 원문 미확인이라 넣지 않는다. 대신 구조적 무결성을 검사한다:
+#    상태 구간 겹침 없음, UDT 구간은 고장 구간 안, PM 사유의 SDT 구간은 PM 구간 안
+#################################################################
+
+shp:StateIntegrityShape a sh:NodeShape ;
+  sh:targetClass fab:Tool ;
+  sh:sparql [
+    a sh:SPARQLConstraint ;
+    sh:message "상태 구간 겹침" ;
+    sh:prefixes <https://w3id.org/ontosemc/shapes> ;
+    sh:select """
+      SELECT $this ?value WHERE {
+        ?value fab:stateOf $this ; fab:startTime ?s1 ; fab:endTime ?e1 .
+        ?i2 fab:stateOf $this ; fab:startTime ?s2 ; fab:endTime ?e2 .
+        FILTER (?value != ?i2 && ?s1 < ?e2 && ?s2 < ?e1 && STR(?value) < STR(?i2))
+      }""" ] ,
+  [
+    a sh:SPARQLConstraint ;
+    sh:message "UDT 구간에 대응하는 고장이 없음" ;
+    sh:prefixes <https://w3id.org/ontosemc/shapes> ;
+    sh:select """
+      SELECT $this ?value WHERE {
+        ?value fab:stateOf $this ; fab:e10State fab:UDT ; fab:startTime ?s ; fab:endTime ?e .
+        FILTER NOT EXISTS { ?d a fab:Breakdown ; fab:onTool $this ; fab:startTime ?ds ; fab:endTime ?de .
+                            FILTER (?ds <= ?s && ?e <= ?de) }
+      }""" ] ,
+  [
+    a sh:SPARQLConstraint ;
+    sh:message "PM 사유 SDT 구간에 대응하는 PM이 없음" ;
+    sh:prefixes <https://w3id.org/ontosemc/shapes> ;
+    sh:select """
+      SELECT $this ?value WHERE {
+        ?value fab:stateOf $this ; fab:e10State fab:SDT ; fab:stateReason "PM" ; fab:startTime ?s ; fab:endTime ?e .
+        FILTER NOT EXISTS { ?d a fab:PreventiveMaintenance ; fab:onTool $this ; fab:startTime ?ds ; fab:endTime ?de .
+                            FILTER (?ds <= ?s && ?e <= ?de) }
+      }""" ] .
+
+#################################################################
+# 6. 구조적 무결성 (SHACL Core)
+#################################################################
+
+shp:StepExecutionShape a sh:NodeShape ;
+  sh:targetClass fab:StepExecution ;
+  sh:property [ sh:path fab:ofLot ; sh:minCount 1 ; sh:maxCount 1 ; sh:class fab:Lot ] ,
+              [ sh:path fab:atStep ; sh:minCount 1 ; sh:maxCount 1 ; sh:class fab:ProcessStep ] ,
+              [ sh:path fab:trackInTime ; sh:minCount 1 ; sh:maxCount 1 ; sh:datatype xsd:dateTime ;
+                sh:lessThanOrEquals fab:trackOutTime ] ,
+              [ sh:path fab:processedOn ; sh:maxCount 1 ; sh:class fab:Tool ] ;
+  sh:xone ( [ sh:path fab:processedOn ; sh:minCount 1 ] [ sh:path fab:waitedAt ; sh:minCount 1 ] ) .
+
+shp:StateIntervalShape a sh:NodeShape ;
+  sh:targetClass fab:EquipmentStateInterval ;
+  sh:property [ sh:path fab:stateOf ; sh:minCount 1 ; sh:maxCount 1 ] ,
+              [ sh:path fab:e10State ; sh:minCount 1 ; sh:maxCount 1 ;
+                sh:in ( fab:PRD fab:SBY fab:ENG fab:SDT fab:UDT fab:NST ) ] ,
+              [ sh:path fab:startTime ; sh:minCount 1 ; sh:maxCount 1 ; sh:lessThan fab:endTime ] .
+
+shp:LotShape a sh:NodeShape ;
+  sh:targetClass fab:Lot ;
+  sh:property [ sh:path fab:followsRoute ; sh:minCount 1 ; sh:maxCount 1 ] ,
+              [ sh:path fab:waferQty ; sh:minCount 1 ; sh:minInclusive 1 ; sh:maxInclusive 25 ] .
+
+shp:WaferShape a sh:NodeShape ;
+  sh:targetClass fab:Wafer ;
+  sh:property [ sh:path fab:waferOf ; sh:minCount 1 ; sh:maxCount 1 ] ,
+              [ sh:path fab:exhibits ; sh:maxCount 1 ; sh:class fab:DefectPattern ] .

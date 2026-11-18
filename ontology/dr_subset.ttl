@@ -1,0 +1,193 @@
+# Digital Reference 서브셋 (commit db88755). 자동 생성: scripts/extract_dr_subset.py
+# fab.ttl이 정렬한 DR 클래스·속성 27개 + 상위 계층. 직접 수정하지 않는다
+
+@prefix dr: <http://www.w3id.org/ecsel-dr#> .
+@prefix ecsel-dr-DF: <http://www.w3id.org/ecsel-dr-DF#> .
+@prefix ecsel-dr-GDM: <http://www.w3id.org/ecsel-dr-GDM#> .
+@prefix ecsel-dr-SO: <http://www.w3id.org/ecsel-dr-SO#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+
+dr:Product a owl:Class ;
+    rdfs:label "Product" ;
+    rdfs:comment """A product is any tangible output or service that is a result of a process and that is intended for delivery to a customer or end user. A product is something that is produced with effort (e.g. by mechanical or industrial processes) and sold to a customer. A product is either tangible (physical product) or intangible (service). A solution is a combination of products which is sold to a customer. Thereby, a solution solves a problem or fulfills a customer need.\r
+\r
+The superclass of all classes describing products or services types, either by nature or purpose. Examples for such subclasses are "TV set", "vacuum cleaner", etc. An instance of this class can be either an actual product or service (gr:Individual), a placeholder instance for unknown instances of a mass-produced commodity (gr:SomeItems), or a model / prototype specification (gr:ProductOrServiceModel). When in doubt, use gr:SomeItems. Examples:\r
+a) MyCellphone123, i.e. my personal, tangible cell phone (gr:Individual)\r
+b) Siemens1234, i.e. the Siemens cell phone make and model 1234 (gr:ProductOrServiceModel)\r
+c) dummyCellPhone123 as a placeholder for actual instances of a certain kind of cell phones (gr:SomeItems)""" ;
+    rdfs:subClassOf dr:Product_Lobe ;
+    skos:definition "A PRODUCT is a good that fulfills a prescribed set of requirements (for instance, form, fit, and function). A set of alternative BOMs might be associated with each product. The manufacturing process is complicated by binning and substitution (in production). Binning refers to the process that an item can become one of several products based on tested levels of performance, for instance, speed." .
+
+ecsel-dr-DF:Engineering_Lot a owl:Class ;
+    rdfs:label "Engineering Lot"@en ;
+    rdfs:comment "An engineering lot requires additional process development efforts and special attention during the production flow. Engineering lots have various functions, thus several engineering lot types can be differentiated." ;
+    rdfs:subClassOf ecsel-dr-DF:Lot .
+
+ecsel-dr-DF:Productive_Lot a owl:Class ;
+    rdfs:label "Productive Lot"@en ;
+    rdfs:comment "A productive lot is created to fulfill a customer demand. The production process is carried out as it is defined during the production development phase." ;
+    rdfs:subClassOf ecsel-dr-DF:Lot .
+
+ecsel-dr-GDM:Current_WIP a owl:Class ;
+    rdfs:label "Current Wip" ;
+    rdfs:subClassOf dr:Semiconductor_Production_Lobe .
+
+ecsel-dr-GDM:Location a owl:Class ;
+    rdfs:label "Location"@en ;
+    rdfs:comment """LOCATION refers to a physical or virtual place where an action, process, or activity occurs, playing a critical role in the execution of tasks within the supply chain, production, and planning systems.\r
+\r
+•	Logistics perspective: A location signifies the point where responsibility, ownership, or risk transitions between parties during the transfer of goods or services.\r
+•	Demand Fulfillment Perspective: A location represents the origin or destination of demand-related processes, such as the point of product dispatch, delivery to customers, or storage of inventory to meet customer needs.\r
+•	Planning Perspective: Locations are key inputs for planning activities, representing the physical sites or nodes in the supply chain (e.g., factories, warehouses, or distribution centers) where resources, capacity, or inventory must be allocated.\r
+•	Semiconductor Production Perspective: In manufacturing, a location indicates a specific site where production steps take place, such as fabrication, assembly, or testing.\r
+\r
+LOCATIONS are fundamental to managing supply chain efficiency, tracking material flow, coordinating production processes, and ensuring timely fulfillment of customer orders.""" ;
+    rdfs:subClassOf dr:Semiconductor_Production_Lobe .
+
+ecsel-dr-GDM:Lot_Event a owl:Class ;
+    rdfs:comment "Gives the history of lot events (Processing, Hold, Split, Merge, etc.) and equivalently to the lots, the equipment also has to be historically tracked " ;
+    rdfs:subClassOf dr:Semiconductor_Production_Lobe .
+
+ecsel-dr-GDM:Time_Constraint a owl:Class ;
+    rdfs:label "Time Constraint"@en ;
+    rdfs:subClassOf dr:Process_Lobe ;
+    skos:definition "is a condition with in semiconductor route for single process steps this means 2 or more process steps need to be carried out within certain time frame or there has to be a certain time elapsed between 2 single process steps." .
+
+ecsel-dr-GDM:belongs_to_equipment_group a owl:ObjectProperty ;
+    rdfs:label "belongs to equipment group"@en ;
+    rdfs:domain ecsel-dr-GDM:Equipment ;
+    rdfs:range ecsel-dr-GDM:Equipment_Group .
+
+ecsel-dr-GDM:has_a_state_equipment_state a owl:ObjectProperty ;
+    rdfs:label "has a state equipment state"@en ;
+    rdfs:domain ecsel-dr-GDM:Equipment ;
+    rdfs:range ecsel-dr-GDM:Equipment_State .
+
+ecsel-dr-GDM:isDefinedByRoute a owl:ObjectProperty ;
+    rdfs:domain ecsel-dr-GDM:Route_Sequence ;
+    rdfs:range ecsel-dr-GDM:Route .
+
+ecsel-dr-GDM:isPerformedAtEquipment a owl:ObjectProperty ;
+    rdfs:domain ecsel-dr-GDM:Maintenance ;
+    rdfs:range ecsel-dr-GDM:Equipment .
+
+ecsel-dr-SO:Equipment_Group a owl:Class ;
+    rdfs:label "Equipment Group"@en ;
+    rdfs:comment "Each machine is allocated to a group of machines doing similar processes. The equipment groups are described and allocated in the master entity “Equipment Group”. (master entity)"@en ;
+    rdfs:subClassOf dr:Semiconductor_Development_Lobe .
+
+ecsel-dr-SO:Fab a owl:Class ;
+    rdfs:label "Fabrication"@en ;
+    rdfs:comment "The “Fab” entity depicts the fab as a technological and physical production unit. (master entity)"@en ;
+    rdfs:subClassOf dr:Semiconductor_Production_Lobe .
+
+ecsel-dr-SO:Lot a owl:Class ;
+    rdfs:label "Lot"@en ;
+    rdfs:comment "The Lot represents manufacturing unit (e.g. in the semicondutor industry in Frontend this often consists of 25 or 50 wafers)."@en ;
+    rdfs:subClassOf dr:Semiconductor_Production_Lobe .
+
+ecsel-dr-SO:Operation a owl:Class ;
+    rdfs:label "Operation"@en ;
+    rdfs:comment "The master entity “Operation” depicts the generic behavior of a single process step. Each operation has a foreign key relation to equipment and to route which means that the operation is required by the specific routes and requires a specific equipment. (workflow descriptive master entity)"@en ;
+    rdfs:subClassOf dr:Semiconductor_Production_Lobe .
+
+ecsel-dr-SO:Route a owl:Class ;
+    rdfs:label "Route"@en ;
+    rdfs:comment "The master entity “Route” describes the structure of a workflow out of operations. Every product uses a specific route in its value stream, i.e. the complete sequence of operations with all mandatory and optional operations necessary to complete the product. A route makes use of the single operations. (workflow descriptive master entity)"@en ;
+    rdfs:subClassOf dr:Semiconductor_Production_Lobe .
+
+ecsel-dr-SO:Time_Constraints a owl:Class ;
+    rdfs:label "Time Constraints"@en ;
+    rdfs:comment "As single operations can set the lot to a time-critical state, time constraints can ensure that the operation setting it to an uncritical state is not delayed. Also the other case where certain time has to be spent between two operations can be covered with this master entity. (workflow deswcriptive master entities)"@en ;
+    rdfs:subClassOf dr:Semiconductor_Production_Lobe .
+
+ecsel-dr-SO:Tool a owl:Class ;
+    rdfs:label "Tool"@en ;
+    rdfs:comment "A tool is any pieve of semiconductor fabrication or inspection equipment designed to process wafers. Often used synonymously with equipment in the silicon wafer processing industry."@en ;
+    rdfs:subClassOf dr:Semiconductor_Production_Lobe .
+
+ecsel-dr-SO:has_lot_event a owl:ObjectProperty ;
+    rdfs:label "has lot event"@en ;
+    rdfs:range ecsel-dr-SO:Lot_Event .
+
+<http://www.w3id.org/ecsel-dr-subset> a owl:Ontology ;
+    rdfs:comment "Module of the ECSEL Digital Reference (commit db88755) restricted to the classes and properties aligned in fab.ttl and their named super-classes and super-properties. Generated by scripts/extract_dr_subset.py."@en .
+
+dr:Product_Lobe a owl:Class ;
+    rdfs:label "Product Lobe"@en ;
+    rdfs:comment "Lobe owner: Marta Bonik",
+        """A product is a tangible or intangible item or service that is created, manufactured, or offered to fulfill a need or desire of customers.\r
+\r
+The Product Lobe maps the notions of Customer Part Number Specification, Design Target, Integration Level, Main Power Device Type, Motor Type and Organization.\r
+It also models Packing Type, Planning Element, Price Indication, Product, Qualification, Semiconductor Product Status, Solution, and Topology."""@en .
+
+dr:Semiconductor_Development_Lobe a owl:Class ;
+    rdfs:label "Semiconductor Development Lobe"@en ;
+    rdfs:comment "Lobe owner: Hans Ehm",
+        """Semiconductor development refers to the process of researching, designing, and creating semiconductor devices to meet technological advancements and industry demands.\r
+\r
+The Semiconductor Development lobe of the Digital Reference models the Current Work In Progress, Cycle Time and Delivery Commitment, EPA, Equipment and Equipent Group, and Event Calendar.\r
+It reprensents the notions of Mask, Material Transfer Matrix, Operation, Operator, Owner, Planning Work Center, Plant,  and Process.\r
+It also maps the topics of Product Level, Target Revenue and Service Level, Technology, Time Constraints, Tool, and Workshop."""@en .
+
+ecsel-dr-GDM:Cluster a owl:Class ;
+    rdfs:label "Cluster"@en ;
+    rdfs:subClassOf dr:Semiconductor_Production_Lobe ;
+    skos:definition "A group of interconnected entities, resources, processes, machines in the semiconductor supply chain that are physically or logically grouped together to achieve specific objectives, such as enhanced operational efficiency, shared resource utilization, or collaborative manufacturing. A cluster can represent physical configurations (e.g., tool clusters), geographical groupings (e.g., regional semiconductor hubs), or logical groupings (e.g., functional or process-level clusters)." .
+
+ecsel-dr-GDM:Equipment_Group a owl:Class ;
+    rdfs:label "Equipment Group" ;
+    rdfs:comment "Equipment Group Name. Group of same type of machines for production of certain production steps " ;
+    rdfs:subClassOf dr:Semiconductor_Production_Lobe .
+
+ecsel-dr-GDM:Equipment_State a owl:Class ;
+    rdfs:label "Equipment State" ;
+    rdfs:subClassOf dr:Semiconductor_Production_Lobe ;
+    skos:definition "The current operational condition or status of a specific piece of equipment within the semiconductor manufacturing or supply chain process at a given point in time. It captures the machine's functional state, availability, and readiness, providing essential information for decision-making, process control, and resource optimization. Equipment_State may include details about operational performance, maintenance requirements, or downtime." .
+
+ecsel-dr-GDM:Maintenance a owl:Class ;
+    rdfs:comment "Includes all different maintenance types and their durations and it can be described several times and can vary slightly between the equipment " ;
+    rdfs:subClassOf dr:Semiconductor_Production_Lobe .
+
+ecsel-dr-GDM:Route a owl:Class ;
+    rdfs:label "Route" ;
+    rdfs:comment "Route name. Define the route that produces a product. Order of production steps for one product" ;
+    rdfs:subClassOf dr:Process_Lobe .
+
+ecsel-dr-GDM:Route_Sequence a owl:Class ;
+    rdfs:label "Route Sequence"@en ;
+    rdfs:subClassOf dr:Process_Lobe .
+
+ecsel-dr-SO:Lot_Event a owl:Class ;
+    rdfs:label "Lot Event"@en ;
+    rdfs:comment "The Lot Event  tracing entity gives the history of lot events. e.g. Hold events, Split events, Merge events, etc. (tracing entities)."@en ;
+    rdfs:subClassOf dr:Semiconductor_Production_Lobe .
+
+ecsel-dr-DF:Lot a owl:Class ;
+    rdfs:comment "A lot is a set of wafers, substrates or modules that travel together through the FE or BE fab in order to fulfill a certain order." ;
+    rdfs:subClassOf dr:Semiconductor_Production_Lobe .
+
+dr:Process_Lobe a owl:Class ;
+    rdfs:label "Process Lobe"@en ;
+    rdfs:comment "Lobe owner: Hans Ehm",
+        """Process refers to a series of interconnected and sequential actions, steps, or operations designed to achieve a specific outcome or goal within a system or organization.\r
+\r
+The Process lobe of the Digital Reference ontology represents the topics of Agent, Business Process Flow, Function and Function Object.\r
+It also maps the notions of Goal, Input, Model and Model Element, Output, Screen, and Value-added Chain Diagram."""@en .
+
+ecsel-dr-GDM:Equipment a owl:Class ;
+    rdfs:label "Equipment" ;
+    rdfs:comment "Equipment name. Machine of one equipment type that can execute certain production (or measurement) steps  " ;
+    rdfs:subClassOf ecsel-dr-GDM:Cluster .
+
+dr:Semiconductor_Production_Lobe a owl:Class ;
+    rdfs:label "Semiconductor Production Lobe"@en ;
+    rdfs:comment "Lobe owner: Philipp Ulrich"@en,
+        """Semiconductor production refers to the manufacturing process of creating integrated circuits and other semiconductor devices by deposing, patterning, and doping various materials on a substrate to form electronic components.\r
+\r
+The Semiconductor Production lobe represents the notions of Bottleneck, Capacity, Demand Snapshot, Fabrication, Furnace Process, Lot, Lot Event and Size.\r
+It also maps the topics of Physical Resource, Priority Class, Product, Production Request, Purge, Release Plan, and Robot.\r
+It models Route, Shift, Simulation Part and Route, Supply Chain, Target Costs and Work In Progress Station."""@en .
+

@@ -1,0 +1,25 @@
+FabOps Agent Bench
+Copyright 2026 Dongyun Seo
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Third-party components
+----------------------
+
+ontology/dr_subset.ttl
+  A subset of the ECSEL Digital Reference ontology (https://github.com/tibonto/dr),
+  commit db88755, extracted by scripts/extract_dr_subset.py.
+  Licensed under the Apache License, Version 2.0.
+
+scripts/pyscfabsim_local.patch
+  A patch to PySCFabSim (https://github.com/prosysscience/PySCFabSim-release),
+  Copyright (c) 2026 Research Group Production Systems, MIT License.
+  PySCFabSim itself is not included; apply the patch to a local clone.
+
+Data not included
+-----------------
+
+The SMT2020 fab models (Kopp et al., IEEE Transactions on Semiconductor Manufacturing, 2020),
+the SMAT2022 tool data (Lee et al., Winter Simulation Conference, 2022), and the WM-811K wafer maps
+(Wu et al., IEEE Transactions on Semiconductor Manufacturing, 2015) are not redistributed.
+Obtain them from their original sources.

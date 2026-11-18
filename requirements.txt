@@ -1,0 +1,12 @@
+# 실험 재현용 고정 버전 (Python 3.10, Windows 11). 2026-10-30
+# morph-kgc 2.10이 pyoxigraph<0.4를 요구해 pyoxigraph는 0.3대로 고정
+pandas==2.2.3
+numpy==1.26.4
+scipy==1.15.3
+openpyxl==3.1.5
+pypdf==5.1.0
+rdflib==7.2.1
+owlrl==7.1.4
+pyshacl==0.31.0
+pyoxigraph==0.3.22
+morph-kgc==2.10.0

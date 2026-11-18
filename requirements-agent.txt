@@ -1,0 +1,11 @@
+# 에이전트 하니스용 추가 패키지. 데이터 파이프라인의 고정 버전(requirements.txt)은 그대로 쓴다.
+# 설치: python -m venv .venv-agent --system-site-packages
+#       .venv-agent\Scripts\python -m pip install -r requirements-agent.txt
+-r requirements.txt
+anthropic==2.8.0
+openai==3.50.0
+python-dotenv==1.0.1
+PyYAML==6.0.2
+jsonschema==4.23.0
+psutil==6.1.0
+pytest==9.2.0

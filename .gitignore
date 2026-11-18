@@ -1,0 +1,21 @@
+# secrets
+.env
+
+# external data and generated artifacts (see README: Setup)
+data/
+*.sqlite
+*.sqlite-journal
+
+# run outputs that are not published (raw trial logs, cost ledgers, live status)
+runs/*/trials/
+runs/*/ledger.jsonl
+runs/*/status*.txt
+runs/*/console*.log
+runs/_verify*/
+runs/_probe/
+
+# Python
+__pycache__/
+*.pyc
+.venv*/
+.pytest_cache/

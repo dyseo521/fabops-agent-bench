@@ -1,0 +1,378 @@
+# 팹 확장 T-Box (초안 v0.1)
+# - 과제 사전 등록 전까지 동결하지 않는다 (CLAUDE.md 설계 원칙: 과제와 질문은 온톨로지 확정 전에 사전 등록)
+# - Digital Reference(commit db88755) 클래스·속성에 rdfs:subClassOf / rdfs:subPropertyOf로 정렬한다. 정렬 근거는 ontology/README.md
+# - 원천 SQL DB(scripts/build_source_db.py)의 테이블과 1:1로 대응하는 매핑은 ontology/fab_mapping.r2rml.ttl
+
+@prefix fab:  <https://w3id.org/ontosemc/fab#> .
+@prefix dr:   <http://www.w3id.org/ecsel-dr#> .
+@prefix SO:   <http://www.w3id.org/ecsel-dr-SO#> .
+@prefix GDM:  <http://www.w3id.org/ecsel-dr-GDM#> .
+@prefix DF:   <http://www.w3id.org/ecsel-dr-DF#> .
+@prefix prov: <http://www.w3.org/ns/prov#> .
+@prefix owl:  <http://www.w3.org/2002/07/owl#> .
+@prefix rdf:  <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix skos: <http://www.w3.org/2004/02/skos/core#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+
+<https://w3id.org/ontosemc/fab> a owl:Ontology ;
+    rdfs:label "Fab semantic layer (SMT2020 LVHM_E)"@en ;
+    owl:versionInfo "0.1-draft" ;
+    rdfs:comment "Extension of the ECSEL Digital Reference for an SMT2020-based fab benchmark. Draft: not frozen before task pre-registration."@en .
+
+#################################################################
+# 클래스: 마스터 데이터 (라우트·제약)
+#################################################################
+
+fab:Fab a owl:Class ; rdfs:subClassOf SO:Fab ;
+    skos:definition "The simulated wafer fab (SMT2020 LVHM_E)."@en .
+
+fab:Product a owl:Class ; rdfs:subClassOf dr:Product ;
+    skos:definition "A product family. Production and engineering routes of the same family share a product."@en .
+
+fab:Route a owl:Class ; rdfs:subClassOf SO:Route , GDM:Route ;
+    skos:definition "Ordered sequence of process steps used by lots of one part."@en .
+
+fab:ProductionRoute a owl:Class ; rdfs:subClassOf fab:Route .
+fab:EngineeringRoute a owl:Class ; rdfs:subClassOf fab:Route .
+
+fab:ProcessStep a owl:Class ; rdfs:subClassOf GDM:Route_Sequence ;
+    skos:definition "One position (step number) in one route. Step numbers are local to a route."@en .
+
+fab:Operation a owl:Class ; rdfs:subClassOf SO:Operation ;
+    skos:definition "Operation master entry (e.g. 122_Litho). Shared across routes; unique within a route; always served by the same tool group. Use it, not the step number, to compare steps across routes."@en .
+
+fab:ProcessArea a owl:Class ;
+    skos:definition "Process area such as Litho, Dry_Etch or Diffusion. Breakdown reliability (MTBF, MTTR) is defined per area."@en .
+
+fab:QTimeConstraint a owl:Class ; rdfs:subClassOf GDM:Time_Constraint , SO:Time_Constraints ;
+    skos:definition "Critical queue time: the exit step must start within maxHours after the entry step ends (Kopp et al. WSC 2020)."@en .
+
+#################################################################
+# 클래스: 장비·PM
+#################################################################
+
+fab:ToolGroup a owl:Class ; rdfs:subClassOf SO:Equipment_Group , GDM:Equipment_Group ;
+    skos:definition "Group of identical tools qualified for the same steps. In SMT2020 the tool group is the qualification set."@en .
+
+fab:DelayStation a owl:Class ;
+    skos:definition "Virtual waiting station (Delay_32). Not physical equipment; steps on it only add a waiting time."@en .
+
+fab:Tool a owl:Class ; rdfs:subClassOf SO:Tool , GDM:Equipment ;
+    skos:definition "Physical tool. Identifiers are SMAT2022 equipment names."@en .
+
+fab:Bay a owl:Class ; rdfs:subClassOf GDM:Location ;
+    skos:definition "Bay of the fab layout (SMAT2022)."@en .
+
+fab:PMPlan a owl:Class ;
+    skos:definition "Preventive maintenance plan of a tool group: calendar based or wafer-count based."@en .
+
+fab:DownEvent a owl:Class ; rdfs:subClassOf GDM:Maintenance ;
+    skos:definition "Interval in which a tool is not available: unscheduled breakdown with repair, or preventive maintenance."@en .
+fab:Breakdown a owl:Class ; rdfs:subClassOf fab:DownEvent .
+fab:PreventiveMaintenance a owl:Class ; rdfs:subClassOf fab:DownEvent .
+
+fab:EquipmentStateInterval a owl:Class ; rdfs:subClassOf GDM:Equipment_State ;
+    skos:definition "Interval with one SEMI E10 basic state of one tool. Intervals of a tool do not overlap and cover the recorded window."@en .
+
+fab:E10State a owl:Class ;
+    skos:definition "SEMI E10 basic equipment state."@en .
+fab:PRD a fab:E10State ; rdfs:label "productive"@en .
+fab:SBY a fab:E10State ; rdfs:label "standby"@en .
+fab:ENG a fab:E10State ; rdfs:label "engineering"@en .
+fab:SDT a fab:E10State ; rdfs:label "scheduled downtime"@en .
+fab:UDT a fab:E10State ; rdfs:label "unscheduled downtime"@en .
+fab:NST a fab:E10State ; rdfs:label "non-scheduled"@en .
+
+#################################################################
+# 클래스: MES
+#################################################################
+
+fab:Lot a owl:Class ; rdfs:subClassOf SO:Lot , DF:Lot ;
+    skos:definition "Manufacturing lot of up to 25 wafers."@en .
+fab:ProductiveLot a owl:Class ; rdfs:subClassOf fab:Lot , DF:Productive_Lot .
+fab:EngineeringLot a owl:Class ; rdfs:subClassOf fab:Lot , DF:Engineering_Lot .
+
+fab:StepExecution a owl:Class ; rdfs:subClassOf SO:Lot_Event , GDM:Lot_Event ;
+    skos:definition "One processing of one lot at one step: queue-in, track-in, track-out. MES records it for the recorded window; YMS keeps it for the full history of lots sorted in the window. Both sources denote the same execution."@en .
+
+fab:SamplingSkip a owl:Class ; rdfs:subClassOf SO:Lot_Event ;
+    skos:definition "A metrology step that the lot skipped because it was not sampled. No measurement exists for it."@en .
+
+fab:ReworkEvent a owl:Class ; rdfs:subClassOf SO:Lot_Event ;
+    skos:definition "The lot was sent back to an earlier step for rework."@en .
+
+fab:LtlDedication a owl:Class ;
+    skos:definition "Lot-to-lens dedication of one lot: the target step must run on the given tool."@en .
+
+fab:WipSnapshotEntry a owl:Class ; rdfs:subClassOf GDM:Current_WIP ;
+    skos:definition "State of one lot at the start of the recorded window."@en .
+
+fab:OpenWait a owl:Class ; rdfs:subClassOf GDM:Current_WIP ;
+    skos:definition "A lot that was still waiting at a step when the recorded window ended. Step executions are recorded at track-in, so this wait has no StepExecution."@en .
+
+fab:QTimeSnapshotEntry a owl:Class ;
+    skos:definition "A lot that was inside a Q-time segment at the start of the recorded window, with the entry step end time."@en .
+
+#################################################################
+# 클래스: YMS
+#################################################################
+
+fab:Wafer a owl:Class ;
+    skos:definition "Wafer of a lot. Wafers of lots sorted in the recorded window carry a wafer sort result."@en .
+
+fab:DefectPattern a owl:Class ;
+    skos:definition "Wafer map failure pattern from wafer sort (WM-811K classes). A wafer without a pattern passed sort without a systematic pattern."@en .
+fab:Center a fab:DefectPattern ; rdfs:label "Center" .
+fab:Donut a fab:DefectPattern ; rdfs:label "Donut" .
+fab:EdgeLoc a fab:DefectPattern ; rdfs:label "Edge-Loc" .
+fab:EdgeRing a fab:DefectPattern ; rdfs:label "Edge-Ring" .
+fab:Loc a fab:DefectPattern ; rdfs:label "Loc" .
+fab:NearFull a fab:DefectPattern ; rdfs:label "Near-full" .
+fab:Random a fab:DefectPattern ; rdfs:label "Random" .
+fab:Scratch a fab:DefectPattern ; rdfs:label "Scratch" .
+
+#################################################################
+# 클래스: 제약 위반 (SHACL 검증 결과를 사실로 materialize. scripts/validate_kg.py)
+#################################################################
+
+fab:ConstraintViolation a owl:Class ;
+    skos:definition "A violation of a fab constraint found by SHACL validation of the recorded data. Queryable evidence for diagnosis."@en .
+fab:QTimeViolation a owl:Class ; rdfs:subClassOf fab:ConstraintViolation ;
+    skos:definition "The lot did not start the exit step within maxHours after the entry step ended. Either it started late, or it was still waiting when the recording ended."@en .
+fab:LtlViolation a owl:Class ; rdfs:subClassOf fab:ConstraintViolation .
+fab:QualificationViolation a owl:Class ; rdfs:subClassOf fab:ConstraintViolation .
+fab:AvailabilityViolation a owl:Class ; rdfs:subClassOf fab:ConstraintViolation ;
+    skos:definition "A lot was tracked in on a tool during its down interval."@en .
+fab:IntegrityViolation a owl:Class ; rdfs:subClassOf fab:ConstraintViolation ;
+    skos:definition "Structural data integrity violation (cardinality, ordering, overlapping equipment states)."@en .
+
+fab:violatesShape a owl:ObjectProperty ; rdfs:domain fab:ConstraintViolation .
+fab:violationFocus a owl:ObjectProperty ; rdfs:domain fab:ConstraintViolation .
+fab:violationValue a owl:ObjectProperty ; rdfs:domain fab:ConstraintViolation .
+fab:violationLot a owl:ObjectProperty ; rdfs:domain fab:ConstraintViolation ; rdfs:range fab:Lot .
+fab:violatedConstraint a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:QTimeViolation ; rdfs:range fab:QTimeConstraint .
+fab:entryEndTime a owl:DatatypeProperty , owl:FunctionalProperty ; rdfs:domain fab:QTimeViolation ; rdfs:range xsd:dateTime .
+fab:deadline a owl:DatatypeProperty , owl:FunctionalProperty ; rdfs:domain fab:QTimeViolation ; rdfs:range xsd:dateTime .
+fab:exitExecution a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:QTimeViolation ; rdfs:range fab:StepExecution ;
+    rdfs:comment "First execution of the exit step after the entry step ended. Absent if the lot was still waiting at the end of the recording."@en .
+fab:stillWaiting a owl:DatatypeProperty ; rdfs:domain fab:QTimeViolation ; rdfs:range xsd:boolean .
+fab:overrunHours a owl:DatatypeProperty , owl:FunctionalProperty ; rdfs:domain fab:QTimeViolation ; rdfs:range xsd:double ;
+    rdfs:comment "Exit start minus deadline, in hours. For lots still waiting: end of recording minus deadline."@en .
+fab:violationMessage a owl:DatatypeProperty ; rdfs:domain fab:ConstraintViolation ; rdfs:range xsd:string .
+
+#################################################################
+# 클래스: 인시던트·조치 (데이터 없음. 조치 계층에서 사용)
+#################################################################
+
+fab:Incident a owl:Class ;
+    skos:definition "An event that calls for a response, e.g. an unscheduled tool down."@en .
+
+fab:Action a owl:Class ; rdfs:subClassOf prov:Activity ;
+    skos:definition "Formal action proposed by an agent. Validated by the SHACL gate before commit."@en .
+fab:HoldLot a owl:Class ; rdfs:subClassOf fab:Action .
+fab:ReleaseLot a owl:Class ; rdfs:subClassOf fab:Action .
+fab:ReassignLot a owl:Class ; rdfs:subClassOf fab:Action .
+fab:Reprioritize a owl:Class ; rdfs:subClassOf fab:Action .
+fab:Escalate a owl:Class ; rdfs:subClassOf fab:Action .
+fab:FlagDisposition a owl:Class ; rdfs:subClassOf fab:Action .
+
+fab:Scenario a owl:Class ;
+    skos:definition "An action scenario: an incident (tool down) at a scenario time. Agents and the gate may use only facts known at that time."@en .
+fab:inScenario a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:Action ; rdfs:range fab:Scenario .
+fab:scenarioTime a owl:DatatypeProperty , owl:FunctionalProperty ; rdfs:domain fab:Scenario ; rdfs:range xsd:dateTime .
+fab:incidentTool a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:Scenario ; rdfs:range fab:Tool .
+fab:incidentDown a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:Scenario ; rdfs:range fab:DownEvent .
+fab:actionLot a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:Action ; rdfs:range fab:Lot .
+fab:actionTool a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:Action ; rdfs:range fab:Tool .
+fab:toTool a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:ReassignLot ; rdfs:range fab:Tool .
+fab:newPriority a owl:DatatypeProperty , owl:FunctionalProperty ; rdfs:domain fab:Reprioritize ; rdfs:range xsd:integer .
+fab:escalateTo a owl:DatatypeProperty , owl:FunctionalProperty ; rdfs:domain fab:Escalate ; rdfs:range xsd:string ;
+    rdfs:comment "MAINTENANCE or PROCESS_ENGINEERING."@en .
+fab:requestType a owl:DatatypeProperty , owl:FunctionalProperty ; rdfs:domain fab:Escalate ; rdfs:range xsd:string ;
+    rdfs:comment "REPAIR, DEDICATION_WAIVER or PM_DEFER."@en .
+fab:deferHours a owl:DatatypeProperty , owl:FunctionalProperty ; rdfs:domain fab:Escalate ; rdfs:range xsd:double .
+fab:expectedDownHours a owl:DatatypeProperty , owl:FunctionalProperty ; rdfs:domain fab:Scenario ; rdfs:range xsd:double ;
+    rdfs:comment "Expected downtime of the incident: area MTTR for a breakdown, mean duration of the tool group's PM plans with the same trigger for a PM."@en .
+
+#################################################################
+# 서로소 공리
+#################################################################
+
+[] a owl:AllDisjointClasses ;
+   owl:members ( fab:Tool fab:ToolGroup fab:DelayStation fab:Bay ) .
+[] a owl:AllDisjointClasses ;
+   owl:members ( fab:Lot fab:Wafer fab:StepExecution fab:ProcessStep fab:Operation fab:Route ) .
+fab:ProductiveLot owl:disjointWith fab:EngineeringLot .
+fab:Breakdown owl:disjointWith fab:PreventiveMaintenance .
+fab:ProductionRoute owl:disjointWith fab:EngineeringRoute .
+
+#################################################################
+# 객체 속성: 라우트·제약
+#################################################################
+
+fab:ofProduct a owl:ObjectProperty ; rdfs:range fab:Product .
+
+fab:hasStep a owl:ObjectProperty ; rdfs:domain fab:Route ; rdfs:range fab:ProcessStep ; owl:inverseOf fab:onRoute .
+fab:onRoute a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:subPropertyOf GDM:isDefinedByRoute ;
+    rdfs:domain fab:ProcessStep ; rdfs:range fab:Route .
+
+fab:ofOperation a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:ProcessStep ; rdfs:range fab:Operation .
+fab:requiresToolGroup a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:ProcessStep ; rdfs:range fab:ToolGroup .
+fab:waitsAt a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:ProcessStep ; rdfs:range fab:DelayStation .
+fab:inArea a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:ToolGroup ; rdfs:range fab:ProcessArea .
+
+fab:nextStep a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:subPropertyOf fab:precedesStep ;
+    rdfs:domain fab:ProcessStep ; rdfs:range fab:ProcessStep .
+fab:precedesStep a owl:ObjectProperty , owl:TransitiveProperty ; rdfs:domain fab:ProcessStep ; rdfs:range fab:ProcessStep ;
+    rdfs:comment "Not materialized (quadratic size). Query with fab:nextStep+."@en .
+
+fab:ltlDedicatedTo a owl:ObjectProperty , owl:TransitiveProperty ; rdfs:domain fab:ProcessStep ; rdfs:range fab:ProcessStep ;
+    skos:definition "The lot must use at the object step exactly the tool it used at the subject step (lot-to-lens dedication)."@en .
+
+fab:reworkTo a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:ProcessStep ; rdfs:range fab:ProcessStep .
+
+fab:hasQTimeConstraint a owl:ObjectProperty ; rdfs:domain fab:ProcessStep ; rdfs:range fab:QTimeConstraint ;
+    owl:inverseOf fab:entryStep .
+fab:entryStep a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:QTimeConstraint ; rdfs:range fab:ProcessStep .
+fab:exitStep a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:QTimeConstraint ; rdfs:range fab:ProcessStep .
+
+#################################################################
+# 객체 속성: 장비·PM
+#################################################################
+
+fab:memberOf a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:subPropertyOf GDM:belongs_to_equipment_group ;
+    rdfs:domain fab:Tool ; rdfs:range fab:ToolGroup .
+fab:locatedIn a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:Tool ; rdfs:range fab:Bay .
+fab:adjacentTo a owl:ObjectProperty , owl:SymmetricProperty ; rdfs:domain fab:Bay ; rdfs:range fab:Bay .
+fab:partOfFab a owl:ObjectProperty ; rdfs:domain fab:Bay ; rdfs:range fab:Fab .
+
+fab:pmPlanFor a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:PMPlan ; rdfs:range fab:ToolGroup .
+fab:onTool a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:subPropertyOf GDM:isPerformedAtEquipment ;
+    rdfs:domain fab:DownEvent ; rdfs:range fab:Tool .
+fab:hasStateInterval a owl:ObjectProperty ; rdfs:subPropertyOf GDM:has_a_state_equipment_state ;
+    rdfs:domain fab:Tool ; rdfs:range fab:EquipmentStateInterval ; owl:inverseOf fab:stateOf .
+fab:stateOf a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:EquipmentStateInterval ; rdfs:range fab:Tool .
+fab:e10State a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:EquipmentStateInterval ; rdfs:range fab:E10State .
+
+#################################################################
+# 객체 속성: MES
+#################################################################
+
+fab:followsRoute a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:Lot ; rdfs:range fab:Route .
+
+fab:hasEvent a owl:ObjectProperty ; rdfs:subPropertyOf SO:has_lot_event ;
+    rdfs:domain fab:Lot ; rdfs:range fab:StepExecution ; owl:inverseOf fab:ofLot .
+fab:ofLot a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:StepExecution ; rdfs:range fab:Lot .
+fab:atStep a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:StepExecution ; rdfs:range fab:ProcessStep .
+fab:processedOn a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:StepExecution ; rdfs:range fab:Tool ;
+    rdfs:comment "Functional: one execution runs on at most one tool. (Not inverse functional: a tool processes many executions.)"@en .
+fab:waitedAt a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:StepExecution ; rdfs:range fab:DelayStation .
+
+fab:skippedLot a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:SamplingSkip ; rdfs:range fab:Lot .
+fab:skippedStep a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:SamplingSkip ; rdfs:range fab:ProcessStep .
+fab:reworkLot a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:ReworkEvent ; rdfs:range fab:Lot .
+fab:reworkFromStep a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:ReworkEvent ; rdfs:range fab:ProcessStep .
+fab:reworkToStep a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:ReworkEvent ; rdfs:range fab:ProcessStep .
+
+fab:dedicatedLot a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:LtlDedication ; rdfs:range fab:Lot .
+fab:dedicatedStep a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:LtlDedication ; rdfs:range fab:ProcessStep .
+fab:dedicatedTool a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:LtlDedication ; rdfs:range fab:Tool .
+fab:dedicationSourceStep a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:LtlDedication ; rdfs:range fab:ProcessStep .
+
+fab:snapshotLot a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:range fab:Lot .
+fab:waitLot a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:OpenWait ; rdfs:range fab:Lot .
+fab:waitStep a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:OpenWait ; rdfs:range fab:ProcessStep .
+fab:snapshotStep a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:WipSnapshotEntry ; rdfs:range fab:ProcessStep .
+fab:snapshotTool a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:WipSnapshotEntry ; rdfs:range fab:Tool .
+fab:openConstraint a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:QTimeSnapshotEntry ; rdfs:range fab:QTimeConstraint .
+
+#################################################################
+# 객체 속성: YMS
+#################################################################
+
+fab:hasWafer a owl:ObjectProperty ; rdfs:domain fab:Lot ; rdfs:range fab:Wafer ; owl:inverseOf fab:waferOf .
+fab:waferOf a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:Wafer ; rdfs:range fab:Lot .
+fab:exhibits a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:Wafer ; rdfs:range fab:DefectPattern .
+
+#################################################################
+# 속성 사슬 (OWL 2 RL). A-Box에서는 ETL 단계에서 materialize 한다 (scripts/build_kg.py)
+#################################################################
+
+fab:passedThroughTool a owl:ObjectProperty ; rdfs:domain fab:Lot ; rdfs:range fab:Tool ;
+    owl:propertyChainAxiom ( fab:hasEvent fab:processedOn ) .
+fab:passedThroughToolGroup a owl:ObjectProperty ; rdfs:domain fab:Lot ; rdfs:range fab:ToolGroup ;
+    owl:propertyChainAxiom ( fab:hasEvent fab:processedOn fab:memberOf ) .
+fab:passedThroughBay a owl:ObjectProperty ; rdfs:domain fab:Lot ; rdfs:range fab:Bay ;
+    owl:propertyChainAxiom ( fab:hasEvent fab:processedOn fab:locatedIn ) .
+fab:passedThroughOperation a owl:ObjectProperty ; rdfs:domain fab:Lot ; rdfs:range fab:Operation ;
+    owl:propertyChainAxiom ( fab:hasEvent fab:atStep fab:ofOperation ) .
+fab:executedOperation a owl:ObjectProperty , owl:FunctionalProperty ; rdfs:domain fab:StepExecution ; rdfs:range fab:Operation ;
+    owl:propertyChainAxiom ( fab:atStep fab:ofOperation ) .
+
+#################################################################
+# 데이터 속성
+#################################################################
+
+fab:identifier a owl:DatatypeProperty ; rdfs:range xsd:string ;
+    rdfs:comment "Identifier as used in the source systems (lot ID, equipment name, route ID, operation name)."@en .
+
+# 라우트·제약
+fab:stepSeq a owl:DatatypeProperty , owl:FunctionalProperty ; rdfs:domain fab:ProcessStep ; rdfs:range xsd:integer .
+fab:processUnit a owl:DatatypeProperty ; rdfs:domain fab:ProcessStep ; rdfs:range xsd:string ;
+    rdfs:comment "WAFER, LOT or BATCH."@en .
+fab:procTimeMeanMin a owl:DatatypeProperty ; rdfs:domain fab:ProcessStep ; rdfs:range xsd:double .
+fab:procTimeOffsetMin a owl:DatatypeProperty ; rdfs:domain fab:ProcessStep ; rdfs:range xsd:double .
+fab:batchMinWafers a owl:DatatypeProperty ; rdfs:domain fab:ProcessStep ; rdfs:range xsd:integer .
+fab:batchMaxWafers a owl:DatatypeProperty ; rdfs:domain fab:ProcessStep ; rdfs:range xsd:integer .
+fab:setupId a owl:DatatypeProperty ; rdfs:domain fab:ProcessStep ; rdfs:range xsd:string .
+fab:samplingPct a owl:DatatypeProperty ; rdfs:domain fab:ProcessStep ; rdfs:range xsd:double .
+fab:reworkPct a owl:DatatypeProperty ; rdfs:domain fab:ProcessStep ; rdfs:range xsd:double .
+fab:maxHours a owl:DatatypeProperty , owl:FunctionalProperty ; rdfs:domain fab:QTimeConstraint ; rdfs:range xsd:double .
+fab:stepCount a owl:DatatypeProperty ; rdfs:domain fab:Route ; rdfs:range xsd:integer .
+
+# 장비·PM
+fab:toolCount a owl:DatatypeProperty ; rdfs:domain fab:ToolGroup ; rdfs:range xsd:integer .
+fab:isBatch a owl:DatatypeProperty ; rdfs:domain fab:ToolGroup ; rdfs:range xsd:boolean .
+fab:isCascading a owl:DatatypeProperty ; rdfs:domain fab:ToolGroup ; rdfs:range xsd:boolean .
+fab:bayType a owl:DatatypeProperty ; rdfs:domain fab:Bay ; rdfs:range xsd:string .
+fab:mtbfHours a owl:DatatypeProperty ; rdfs:domain fab:ProcessArea ; rdfs:range xsd:double .
+fab:mttrHours a owl:DatatypeProperty ; rdfs:domain fab:ProcessArea ; rdfs:range xsd:double .
+fab:pmTrigger a owl:DatatypeProperty ; rdfs:range xsd:string ; rdfs:comment "CALENDAR or WAFER_COUNT."@en .
+fab:pmInterval a owl:DatatypeProperty ; rdfs:domain fab:PMPlan ; rdfs:range xsd:double .
+fab:intervalUnit a owl:DatatypeProperty ; rdfs:domain fab:PMPlan ; rdfs:range xsd:string .
+fab:durationMeanHours a owl:DatatypeProperty ; rdfs:domain fab:PMPlan ; rdfs:range xsd:double .
+fab:durationOffsetHours a owl:DatatypeProperty ; rdfs:domain fab:PMPlan ; rdfs:range xsd:double .
+fab:startTime a owl:DatatypeProperty , owl:FunctionalProperty ; rdfs:range xsd:dateTime .
+fab:endTime a owl:DatatypeProperty , owl:FunctionalProperty ; rdfs:range xsd:dateTime .
+fab:stateReason a owl:DatatypeProperty ; rdfs:domain fab:EquipmentStateInterval ; rdfs:range xsd:string ;
+    rdfs:comment "BREAKDOWN, PM or SETUP for downtime intervals."@en .
+
+# MES
+fab:lotType a owl:DatatypeProperty ; rdfs:domain fab:Lot ; rdfs:range xsd:string .
+fab:priority a owl:DatatypeProperty ; rdfs:domain fab:Lot ; rdfs:range xsd:integer .
+fab:waferQty a owl:DatatypeProperty ; rdfs:domain fab:Lot ; rdfs:range xsd:integer .
+fab:releaseTime a owl:DatatypeProperty ; rdfs:domain fab:Lot ; rdfs:range xsd:dateTime .
+fab:dueTime a owl:DatatypeProperty ; rdfs:domain fab:Lot ; rdfs:range xsd:dateTime .
+fab:completeTime a owl:DatatypeProperty ; rdfs:domain fab:Lot ; rdfs:range xsd:dateTime .
+fab:queueInTime a owl:DatatypeProperty ; rdfs:domain fab:StepExecution ; rdfs:range xsd:dateTime .
+fab:waitSince a owl:DatatypeProperty , owl:FunctionalProperty ; rdfs:domain fab:OpenWait ; rdfs:range xsd:dateTime .
+fab:trackInTime a owl:DatatypeProperty , owl:FunctionalProperty ; rdfs:domain fab:StepExecution ; rdfs:range xsd:dateTime .
+fab:trackOutTime a owl:DatatypeProperty ; rdfs:domain fab:StepExecution ; rdfs:range xsd:dateTime .
+fab:nextArrivalTime a owl:DatatypeProperty ; rdfs:domain fab:StepExecution ; rdfs:range xsd:dateTime .
+fab:setupMinutes a owl:DatatypeProperty ; rdfs:domain fab:StepExecution ; rdfs:range xsd:double .
+fab:runId a owl:DatatypeProperty ; rdfs:domain fab:StepExecution ; rdfs:range xsd:integer ;
+    rdfs:comment "Equipment run. Lots with the same run ID were processed together (batch)."@en .
+fab:runLotCount a owl:DatatypeProperty ; rdfs:domain fab:StepExecution ; rdfs:range xsd:integer .
+fab:eventTime a owl:DatatypeProperty ; rdfs:range xsd:dateTime ;
+    rdfs:comment "Time of a sampling skip, rework or dedication setting."@en .
+fab:wipState a owl:DatatypeProperty ; rdfs:domain fab:WipSnapshotEntry ; rdfs:range xsd:string ; rdfs:comment "RUN or WAIT."@en .
+fab:entryTrackOutTime a owl:DatatypeProperty ; rdfs:domain fab:QTimeSnapshotEntry ; rdfs:range xsd:dateTime .
+
+# YMS
+fab:waferNo a owl:DatatypeProperty ; rdfs:domain fab:Wafer ; rdfs:range xsd:integer .
+fab:sortTime a owl:DatatypeProperty ; rdfs:domain fab:Wafer ; rdfs:range xsd:dateTime .
+
+# 기록 구간 (db_meta)
+fab:windowStart a owl:DatatypeProperty ; rdfs:domain fab:Fab ; rdfs:range xsd:dateTime .
+fab:windowEnd a owl:DatatypeProperty ; rdfs:domain fab:Fab ; rdfs:range xsd:dateTime .

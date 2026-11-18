@@ -1,0 +1,352 @@
+# 원천 SQL DB(SQLite, scripts/build_source_db.py) -> RDF. R2RML (W3C 2012). 처리기: morph-kgc
+# - 한 방향만 매핑한다. 역관계, 속성 사슬, LTL 전이 폐포, fab 상위 클래스 타입은 scripts/build_kg.py가
+#   fab.ttl의 공리를 읽어 materialize 한다
+# - 시각 컬럼은 'YYYY-MM-DD HH:MM:SS.sss' 문자열이라 sqlQuery에서 xsd:dateTime 어휘형으로 바꾼다
+# - StepExecution IRI는 (lot, step, track-in 시각)으로 만든다. MES(mes_lot_step)와 YMS(yms_process_history)에
+#   같은 실행이 있으면 같은 IRI가 되어 한 개체로 합쳐진다
+# - yms_wafer_sort의 'none'은 불량 패턴 없음이다. exhibits 트리플을 만들지 않는다
+# - 불량 주입 정답(data/derived/gt/)은 매핑하지 않는다
+
+@prefix rr:   <http://www.w3.org/ns/r2rml#> .
+@prefix fab:  <https://w3id.org/ontosemc/fab#> .
+@prefix xsd:  <http://www.w3.org/2001/XMLSchema#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix map:  <https://w3id.org/ontosemc/mapping#> .
+
+#################################################################
+# 팹, 기록 구간
+#################################################################
+
+map:Fab a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT (SELECT value FROM db_meta WHERE key = 'dataset') AS dataset,
+           replace((SELECT value FROM db_meta WHERE key = 'window_start_ts'), ' ', 'T') AS w0,
+           replace((SELECT value FROM db_meta WHERE key = 'window_end_ts'), ' ', 'T') AS w1""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/fab/{dataset}" ; rr:class fab:Fab ] ;
+  rr:predicateObjectMap [ rr:predicate fab:identifier ; rr:objectMap [ rr:column "dataset" ] ] ,
+    [ rr:predicate fab:windowStart ; rr:objectMap [ rr:column "w0" ; rr:datatype xsd:dateTime ] ] ,
+    [ rr:predicate fab:windowEnd ; rr:objectMap [ rr:column "w1" ; rr:datatype xsd:dateTime ] ] .
+
+#################################################################
+# 라우트·제약 (rte_)
+#################################################################
+
+map:Product a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery "SELECT DISTINCT product_id FROM rte_route" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/product/{product_id}" ; rr:class fab:Product ] ;
+  rr:predicateObjectMap [ rr:predicate fab:identifier ; rr:objectMap [ rr:column "product_id" ] ] .
+
+map:Route a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT route_id, product_id, step_count,
+           CASE route_type WHEN 'ENGINEERING' THEN 'EngineeringRoute' ELSE 'ProductionRoute' END AS cls
+    FROM rte_route""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/route/{route_id}" ] ;
+  rr:predicateObjectMap [ rr:predicate <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ;
+                          rr:objectMap [ rr:template "https://w3id.org/ontosemc/fab#{cls}" ] ] ,
+    [ rr:predicate fab:identifier ; rr:objectMap [ rr:column "route_id" ] ] ,
+    [ rr:predicate fab:ofProduct ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/product/{product_id}" ] ] ,
+    [ rr:predicate fab:stepCount ; rr:objectMap [ rr:column "step_count" ; rr:datatype xsd:integer ] ] .
+
+map:Operation a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery "SELECT DISTINCT operation FROM rte_route_step" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/operation/{operation}" ; rr:class fab:Operation ] ;
+  rr:predicateObjectMap [ rr:predicate fab:identifier ; rr:objectMap [ rr:column "operation" ] ] .
+
+map:ProcessStep a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT route_id, step_seq, operation, process_unit, proc_time_mean_min, proc_time_offset_min,
+           setup_id, sampling_pct, rework_pct FROM rte_route_step""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{step_seq}" ; rr:class fab:ProcessStep ] ;
+  rr:predicateObjectMap [ rr:predicate fab:onRoute ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/route/{route_id}" ] ] ,
+    [ rr:predicate fab:stepSeq ; rr:objectMap [ rr:column "step_seq" ; rr:datatype xsd:integer ] ] ,
+    [ rr:predicate fab:ofOperation ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/operation/{operation}" ] ] ,
+    [ rr:predicate fab:processUnit ; rr:objectMap [ rr:column "process_unit" ] ] ,
+    [ rr:predicate fab:procTimeMeanMin ; rr:objectMap [ rr:column "proc_time_mean_min" ; rr:datatype xsd:double ] ] ,
+    [ rr:predicate fab:procTimeOffsetMin ; rr:objectMap [ rr:column "proc_time_offset_min" ; rr:datatype xsd:double ] ] ,
+    [ rr:predicate fab:setupId ; rr:objectMap [ rr:column "setup_id" ] ] ,
+    [ rr:predicate fab:samplingPct ; rr:objectMap [ rr:column "sampling_pct" ; rr:datatype xsd:double ] ] ,
+    [ rr:predicate fab:reworkPct ; rr:objectMap [ rr:column "rework_pct" ; rr:datatype xsd:double ] ] .
+
+# morph-kgc 2.10은 NULL이 섞인 xsd:integer 리터럴에서 실패한다. NULL이 있는 정수 컬럼은 따로 매핑한다
+map:ProcessStepBatch a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT route_id, step_seq, batch_min_wafers, batch_max_wafers FROM rte_route_step
+    WHERE batch_min_wafers IS NOT NULL AND batch_max_wafers IS NOT NULL""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{step_seq}" ] ;
+  rr:predicateObjectMap [ rr:predicate fab:batchMinWafers ; rr:objectMap [ rr:column "batch_min_wafers" ; rr:datatype xsd:integer ] ] ,
+    [ rr:predicate fab:batchMaxWafers ; rr:objectMap [ rr:column "batch_max_wafers" ; rr:datatype xsd:integer ] ] .
+
+map:ReworkRule a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT route_id, step_seq, rework_to_step_seq FROM rte_route_step WHERE rework_to_step_seq IS NOT NULL""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{step_seq}" ] ;
+  rr:predicateObjectMap [ rr:predicate fab:reworkTo ;
+                          rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{rework_to_step_seq}" ] ] .
+
+map:ProcessStepToolGroup a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT s.route_id, s.step_seq, s.toolgroup FROM rte_route_step s JOIN eqp_toolgroup g USING (toolgroup)
+    WHERE g.is_delay_station = 0""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{step_seq}" ] ;
+  rr:predicateObjectMap [ rr:predicate fab:requiresToolGroup ;
+                          rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/toolgroup/{toolgroup}" ] ] .
+
+map:ProcessStepDelay a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT s.route_id, s.step_seq, s.toolgroup FROM rte_route_step s JOIN eqp_toolgroup g USING (toolgroup)
+    WHERE g.is_delay_station = 1""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{step_seq}" ] ;
+  rr:predicateObjectMap [ rr:predicate fab:waitsAt ;
+                          rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/toolgroup/{toolgroup}" ] ] .
+
+map:NextStep a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT a.route_id, a.step_seq, b.step_seq AS next_seq FROM rte_route_step a
+    JOIN rte_route_step b ON b.route_id = a.route_id AND b.step_seq = a.step_seq + 1""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{step_seq}" ] ;
+  rr:predicateObjectMap [ rr:predicate fab:nextStep ;
+                          rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{next_seq}" ] ] .
+
+map:QTimeConstraint a rr:TriplesMap ;
+  rr:logicalTable [ rr:tableName "rte_qtime" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/qtime/{route_id}/{entry_step_seq}" ; rr:class fab:QTimeConstraint ] ;
+  rr:predicateObjectMap [ rr:predicate fab:entryStep ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{entry_step_seq}" ] ] ,
+    [ rr:predicate fab:exitStep ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{exit_step_seq}" ] ] ,
+    [ rr:predicate fab:maxHours ; rr:objectMap [ rr:column "qtime_limit_h" ; rr:datatype xsd:double ] ] .
+
+map:LtlRule a rr:TriplesMap ;
+  rr:logicalTable [ rr:tableName "rte_ltl_dedication" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{source_step_seq}" ] ;
+  rr:predicateObjectMap [ rr:predicate fab:ltlDedicatedTo ;
+                          rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{target_step_seq}" ] ] .
+
+#################################################################
+# 장비·PM (eqp_)
+#################################################################
+
+map:Bay a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT bay_id, bay_type, (SELECT value FROM db_meta WHERE key = 'dataset') AS dataset FROM eqp_bay""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/bay/{bay_id}" ; rr:class fab:Bay ] ;
+  rr:predicateObjectMap [ rr:predicate fab:identifier ; rr:objectMap [ rr:column "bay_id" ] ] ,
+    [ rr:predicate fab:bayType ; rr:objectMap [ rr:column "bay_type" ] ] ,
+    [ rr:predicate fab:partOfFab ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/fab/{dataset}" ] ] .
+
+map:BayAdjacency a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    WITH RECURSIVE split(bay_id, nb, rest) AS (
+      SELECT bay_id, '', neighbor_bays || ',' FROM eqp_bay
+      UNION ALL
+      SELECT bay_id, substr(rest, 1, instr(rest, ',') - 1), substr(rest, instr(rest, ',') + 1) FROM split WHERE rest <> '')
+    SELECT bay_id, trim(nb) AS nb FROM split WHERE nb <> '' AND trim(nb) IN (SELECT bay_id FROM eqp_bay)""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/bay/{bay_id}" ] ;
+  rr:predicateObjectMap [ rr:predicate fab:adjacentTo ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/bay/{nb}" ] ] .
+
+map:ProcessArea a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT DISTINCT g.area, r.mtbf_h, r.mttr_h FROM eqp_toolgroup g LEFT JOIN eqp_reliability r USING (area)""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/area/{area}" ; rr:class fab:ProcessArea ] ;
+  rr:predicateObjectMap [ rr:predicate fab:identifier ; rr:objectMap [ rr:column "area" ] ] ,
+    [ rr:predicate fab:mtbfHours ; rr:objectMap [ rr:column "mtbf_h" ; rr:datatype xsd:double ] ] ,
+    [ rr:predicate fab:mttrHours ; rr:objectMap [ rr:column "mttr_h" ; rr:datatype xsd:double ] ] .
+
+map:ToolGroup a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT toolgroup, area, tool_count,
+           CASE is_batch WHEN 1 THEN 'true' ELSE 'false' END AS batch,
+           CASE is_cascading WHEN 1 THEN 'true' ELSE 'false' END AS cascading
+    FROM eqp_toolgroup WHERE is_delay_station = 0""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/toolgroup/{toolgroup}" ; rr:class fab:ToolGroup ] ;
+  rr:predicateObjectMap [ rr:predicate fab:identifier ; rr:objectMap [ rr:column "toolgroup" ] ] ,
+    [ rr:predicate fab:inArea ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/area/{area}" ] ] ,
+    [ rr:predicate fab:toolCount ; rr:objectMap [ rr:column "tool_count" ; rr:datatype xsd:integer ] ] ,
+    [ rr:predicate fab:isBatch ; rr:objectMap [ rr:column "batch" ; rr:datatype xsd:boolean ] ] ,
+    [ rr:predicate fab:isCascading ; rr:objectMap [ rr:column "cascading" ; rr:datatype xsd:boolean ] ] .
+
+map:DelayStation a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery "SELECT toolgroup FROM eqp_toolgroup WHERE is_delay_station = 1" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/toolgroup/{toolgroup}" ; rr:class fab:DelayStation ] ;
+  rr:predicateObjectMap [ rr:predicate fab:identifier ; rr:objectMap [ rr:column "toolgroup" ] ] .
+
+map:Tool a rr:TriplesMap ;
+  rr:logicalTable [ rr:tableName "eqp_tool" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/tool/{eqp_id}" ; rr:class fab:Tool ] ;
+  rr:predicateObjectMap [ rr:predicate fab:identifier ; rr:objectMap [ rr:column "eqp_id" ] ] ,
+    [ rr:predicate fab:memberOf ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/toolgroup/{toolgroup}" ] ] ,
+    [ rr:predicate fab:locatedIn ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/bay/{bay_id}" ] ] .
+
+map:PMPlan a rr:TriplesMap ;
+  rr:logicalTable [ rr:tableName "eqp_pm_plan" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/pmplan/{pm_id}" ; rr:class fab:PMPlan ] ;
+  rr:predicateObjectMap [ rr:predicate fab:identifier ; rr:objectMap [ rr:column "pm_id" ] ] ,
+    [ rr:predicate fab:pmPlanFor ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/toolgroup/{toolgroup}" ] ] ,
+    [ rr:predicate fab:pmTrigger ; rr:objectMap [ rr:column "pm_trigger" ] ] ,
+    [ rr:predicate fab:pmInterval ; rr:objectMap [ rr:column "pm_interval" ; rr:datatype xsd:double ] ] ,
+    [ rr:predicate fab:intervalUnit ; rr:objectMap [ rr:column "interval_unit" ] ] ,
+    [ rr:predicate fab:durationMeanHours ; rr:objectMap [ rr:column "duration_mean_h" ; rr:datatype xsd:double ] ] ,
+    [ rr:predicate fab:durationOffsetHours ; rr:objectMap [ rr:column "duration_offset_h" ; rr:datatype xsd:double ] ] .
+
+map:DownEvent a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT down_id, eqp_id, pm_trigger, replace(start_ts, ' ', 'T') AS t0, replace(end_ts, ' ', 'T') AS t1,
+           CASE down_type WHEN 'BREAKDOWN' THEN 'Breakdown' ELSE 'PreventiveMaintenance' END AS cls
+    FROM eqp_down_event""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/down/{down_id}" ] ;
+  rr:predicateObjectMap [ rr:predicate <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ;
+                          rr:objectMap [ rr:template "https://w3id.org/ontosemc/fab#{cls}" ] ] ,
+    [ rr:predicate fab:identifier ; rr:objectMap [ rr:column "down_id" ] ] ,
+    [ rr:predicate fab:onTool ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/tool/{eqp_id}" ] ] ,
+    [ rr:predicate fab:pmTrigger ; rr:objectMap [ rr:column "pm_trigger" ] ] ,
+    [ rr:predicate fab:startTime ; rr:objectMap [ rr:column "t0" ; rr:datatype xsd:dateTime ] ] ,
+    [ rr:predicate fab:endTime ; rr:objectMap [ rr:column "t1" ; rr:datatype xsd:dateTime ] ] .
+
+map:StateInterval a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT eqp_id, state, reason, start_ts, replace(start_ts, ' ', 'T') AS t0, replace(end_ts, ' ', 'T') AS t1
+    FROM eqp_state_log""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/state/{eqp_id}/{start_ts}" ; rr:class fab:EquipmentStateInterval ] ;
+  rr:predicateObjectMap [ rr:predicate fab:stateOf ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/tool/{eqp_id}" ] ] ,
+    [ rr:predicate fab:e10State ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/fab#{state}" ] ] ,
+    [ rr:predicate fab:stateReason ; rr:objectMap [ rr:column "reason" ] ] ,
+    [ rr:predicate fab:startTime ; rr:objectMap [ rr:column "t0" ; rr:datatype xsd:dateTime ] ] ,
+    [ rr:predicate fab:endTime ; rr:objectMap [ rr:column "t1" ; rr:datatype xsd:dateTime ] ] .
+
+#################################################################
+# MES (mes_)
+#################################################################
+
+map:Lot a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT lot_id, product_id, route_id, lot_type, priority, wafer_qty,
+           replace(release_ts, ' ', 'T') AS t_rel, replace(due_ts, ' ', 'T') AS t_due,
+           replace(complete_ts, ' ', 'T') AS t_done,
+           CASE WHEN lot_type LIKE 'ENG%' THEN 'EngineeringLot' ELSE 'ProductiveLot' END AS cls
+    FROM mes_lot""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/lot/{lot_id}" ] ;
+  rr:predicateObjectMap [ rr:predicate <http://www.w3.org/1999/02/22-rdf-syntax-ns#type> ;
+                          rr:objectMap [ rr:template "https://w3id.org/ontosemc/fab#{cls}" ] ] ,
+    [ rr:predicate fab:identifier ; rr:objectMap [ rr:column "lot_id" ] ] ,
+    [ rr:predicate fab:ofProduct ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/product/{product_id}" ] ] ,
+    [ rr:predicate fab:followsRoute ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/route/{route_id}" ] ] ,
+    [ rr:predicate fab:lotType ; rr:objectMap [ rr:column "lot_type" ] ] ,
+    [ rr:predicate fab:priority ; rr:objectMap [ rr:column "priority" ; rr:datatype xsd:integer ] ] ,
+    [ rr:predicate fab:waferQty ; rr:objectMap [ rr:column "wafer_qty" ; rr:datatype xsd:integer ] ] ,
+    [ rr:predicate fab:releaseTime ; rr:objectMap [ rr:column "t_rel" ; rr:datatype xsd:dateTime ] ] ,
+    [ rr:predicate fab:dueTime ; rr:objectMap [ rr:column "t_due" ; rr:datatype xsd:dateTime ] ] ,
+    [ rr:predicate fab:completeTime ; rr:objectMap [ rr:column "t_done" ; rr:datatype xsd:dateTime ] ] .
+
+map:StepExecutionMES a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT s.lot_id, s.route_id, s.step_seq, s.eqp_id, s.run_id, s.run_lot_count, s.setup_min, s.track_in_ts,
+           replace(s.queue_in_ts, ' ', 'T') AS t_q, replace(s.track_in_ts, ' ', 'T') AS t_in,
+           replace(s.track_out_ts, ' ', 'T') AS t_out, replace(s.next_arrival_ts, ' ', 'T') AS t_next
+    FROM mes_lot_step s""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/exec/{lot_id}/{step_seq}/{track_in_ts}" ; rr:class fab:StepExecution ] ;
+  rr:predicateObjectMap [ rr:predicate fab:ofLot ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/lot/{lot_id}" ] ] ,
+    [ rr:predicate fab:atStep ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{step_seq}" ] ] ,
+    [ rr:predicate fab:processedOn ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/tool/{eqp_id}" ] ] ,
+    [ rr:predicate fab:runId ; rr:objectMap [ rr:column "run_id" ; rr:datatype xsd:integer ] ] ,
+    [ rr:predicate fab:runLotCount ; rr:objectMap [ rr:column "run_lot_count" ; rr:datatype xsd:integer ] ] ,
+    [ rr:predicate fab:setupMinutes ; rr:objectMap [ rr:column "setup_min" ; rr:datatype xsd:double ] ] ,
+    [ rr:predicate fab:queueInTime ; rr:objectMap [ rr:column "t_q" ; rr:datatype xsd:dateTime ] ] ,
+    [ rr:predicate fab:trackInTime ; rr:objectMap [ rr:column "t_in" ; rr:datatype xsd:dateTime ] ] ,
+    [ rr:predicate fab:trackOutTime ; rr:objectMap [ rr:column "t_out" ; rr:datatype xsd:dateTime ] ] ,
+    [ rr:predicate fab:nextArrivalTime ; rr:objectMap [ rr:column "t_next" ; rr:datatype xsd:dateTime ] ] .
+
+map:StepExecutionDelay a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT lot_id, step_seq, track_in_ts, toolgroup FROM mes_lot_step
+    WHERE toolgroup IN (SELECT toolgroup FROM eqp_toolgroup WHERE is_delay_station = 1)
+    UNION
+    SELECT lot_id, step_seq, track_in_ts, toolgroup FROM yms_process_history
+    WHERE toolgroup IN (SELECT toolgroup FROM eqp_toolgroup WHERE is_delay_station = 1)""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/exec/{lot_id}/{step_seq}/{track_in_ts}" ] ;
+  rr:predicateObjectMap [ rr:predicate fab:waitedAt ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/toolgroup/{toolgroup}" ] ] .
+
+map:SamplingSkip a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT lot_id, route_id, step_seq, skip_ts, replace(skip_ts, ' ', 'T') AS t FROM mes_sampling_skip""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/skip/{lot_id}/{step_seq}/{skip_ts}" ; rr:class fab:SamplingSkip ] ;
+  rr:predicateObjectMap [ rr:predicate fab:skippedLot ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/lot/{lot_id}" ] ] ,
+    [ rr:predicate fab:skippedStep ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{step_seq}" ] ] ,
+    [ rr:predicate fab:eventTime ; rr:objectMap [ rr:column "t" ; rr:datatype xsd:dateTime ] ] .
+
+map:Rework a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT lot_id, route_id, from_step_seq, to_step_seq, rework_ts, replace(rework_ts, ' ', 'T') AS t FROM mes_rework""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/rework/{lot_id}/{from_step_seq}/{rework_ts}" ; rr:class fab:ReworkEvent ] ;
+  rr:predicateObjectMap [ rr:predicate fab:reworkLot ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/lot/{lot_id}" ] ] ,
+    [ rr:predicate fab:reworkFromStep ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{from_step_seq}" ] ] ,
+    [ rr:predicate fab:reworkToStep ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{to_step_seq}" ] ] ,
+    [ rr:predicate fab:eventTime ; rr:objectMap [ rr:column "t" ; rr:datatype xsd:dateTime ] ] .
+
+map:LtlDedication a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT d.lot_id, l.route_id, d.target_step_seq, CAST(d.source_step_seq AS TEXT) AS source_step, d.eqp_id,
+           replace(d.set_ts, ' ', 'T') AS t
+    FROM mes_ltl_dedication d JOIN mes_lot l USING (lot_id)""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/dedication/{lot_id}/{target_step_seq}" ; rr:class fab:LtlDedication ] ;
+  rr:predicateObjectMap [ rr:predicate fab:dedicatedLot ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/lot/{lot_id}" ] ] ,
+    [ rr:predicate fab:dedicatedStep ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{target_step_seq}" ] ] ,
+    [ rr:predicate fab:dedicationSourceStep ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{source_step}" ] ] ,
+    [ rr:predicate fab:dedicatedTool ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/tool/{eqp_id}" ] ] ,
+    [ rr:predicate fab:eventTime ; rr:objectMap [ rr:column "t" ; rr:datatype xsd:dateTime ] ] .
+
+map:WipSnapshot a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT w.lot_id, l.route_id, w.state, w.step_seq, w.eqp_id, replace(w.since_ts, ' ', 'T') AS t
+    FROM mes_wip_snapshot w JOIN mes_lot l USING (lot_id)""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/wip/{lot_id}" ; rr:class fab:WipSnapshotEntry ] ;
+  rr:predicateObjectMap [ rr:predicate fab:snapshotLot ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/lot/{lot_id}" ] ] ,
+    [ rr:predicate fab:wipState ; rr:objectMap [ rr:column "state" ] ] ,
+    [ rr:predicate fab:snapshotStep ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{step_seq}" ] ] ,
+    [ rr:predicate fab:snapshotTool ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/tool/{eqp_id}" ] ] ,
+    [ rr:predicate fab:startTime ; rr:objectMap [ rr:column "t" ; rr:datatype xsd:dateTime ] ] .
+
+map:OpenWait a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT w.lot_id, l.route_id, w.step_seq, replace(w.queue_in_ts, ' ', 'T') AS t
+    FROM mes_wait_open w JOIN mes_lot l USING (lot_id)""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/openwait/{lot_id}" ; rr:class fab:OpenWait ] ;
+  rr:predicateObjectMap [ rr:predicate fab:waitLot ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/lot/{lot_id}" ] ] ,
+    [ rr:predicate fab:waitStep ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{step_seq}" ] ] ,
+    [ rr:predicate fab:waitSince ; rr:objectMap [ rr:column "t" ; rr:datatype xsd:dateTime ] ] .
+
+map:QTimeSnapshot a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT q.lot_id, l.route_id, q.entry_step_seq, replace(q.entry_track_out_ts, ' ', 'T') AS t
+    FROM mes_qtime_snapshot q JOIN mes_lot l USING (lot_id)""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/qtsnap/{lot_id}/{entry_step_seq}" ; rr:class fab:QTimeSnapshotEntry ] ;
+  rr:predicateObjectMap [ rr:predicate fab:snapshotLot ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/lot/{lot_id}" ] ] ,
+    [ rr:predicate fab:openConstraint ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/qtime/{route_id}/{entry_step_seq}" ] ] ,
+    [ rr:predicate fab:entryTrackOutTime ; rr:objectMap [ rr:column "t" ; rr:datatype xsd:dateTime ] ] .
+
+#################################################################
+# YMS (yms_)
+#################################################################
+
+map:StepExecutionYMS a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT lot_id, route_id, step_seq, eqp_id, track_in_ts,
+           replace(track_in_ts, ' ', 'T') AS t_in, replace(track_out_ts, ' ', 'T') AS t_out
+    FROM yms_process_history""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/exec/{lot_id}/{step_seq}/{track_in_ts}" ; rr:class fab:StepExecution ] ;
+  rr:predicateObjectMap [ rr:predicate fab:ofLot ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/lot/{lot_id}" ] ] ,
+    [ rr:predicate fab:atStep ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/step/{route_id}/{step_seq}" ] ] ,
+    [ rr:predicate fab:processedOn ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/tool/{eqp_id}" ] ] ,
+    [ rr:predicate fab:trackInTime ; rr:objectMap [ rr:column "t_in" ; rr:datatype xsd:dateTime ] ] ,
+    [ rr:predicate fab:trackOutTime ; rr:objectMap [ rr:column "t_out" ; rr:datatype xsd:dateTime ] ] .
+
+map:Wafer a rr:TriplesMap ;
+  rr:logicalTable [ rr:sqlQuery """
+    SELECT lot_id, wafer_no, replace(sort_ts, ' ', 'T') AS t,
+           CASE defect_pattern WHEN 'Center' THEN 'Center' WHEN 'Donut' THEN 'Donut' WHEN 'Edge-Loc' THEN 'EdgeLoc'
+                WHEN 'Edge-Ring' THEN 'EdgeRing' WHEN 'Loc' THEN 'Loc' WHEN 'Near-full' THEN 'NearFull'
+                WHEN 'Random' THEN 'Random' WHEN 'Scratch' THEN 'Scratch' END AS pat
+    FROM yms_wafer_sort""" ] ;
+  rr:subjectMap [ rr:template "https://w3id.org/ontosemc/data/wafer/{lot_id}/{wafer_no}" ; rr:class fab:Wafer ] ;
+  rr:predicateObjectMap [ rr:predicate fab:waferOf ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/data/lot/{lot_id}" ] ] ,
+    [ rr:predicate fab:waferNo ; rr:objectMap [ rr:column "wafer_no" ; rr:datatype xsd:integer ] ] ,
+    [ rr:predicate fab:sortTime ; rr:objectMap [ rr:column "t" ; rr:datatype xsd:dateTime ] ] ,
+    [ rr:predicate fab:exhibits ; rr:objectMap [ rr:template "https://w3id.org/ontosemc/fab#{pat}" ] ] .
