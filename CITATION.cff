@@ -5,8 +5,6 @@ type: software
 authors:
   - family-names: Seo
     given-names: Dongyun
-  - family-names: Ahn
-    given-names: Namhyuk
 repository-code: "https://github.com/dyseo521/fabops-agent-bench"
 license: Apache-2.0
 keywords:
